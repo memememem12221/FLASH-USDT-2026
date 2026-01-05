@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GitHub IPs — Current GitHub Service IP Ranges</title>
+  <style>
+    :root{
+      --bg:#0b0f19; --card:#071124; --muted:#94a3b8; --accent:#00ffa2; --border:#1f2937;
+      --pad:18px;
+    }
+    body{margin:0;font-family:Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial;
+      background:var(--bg); color:#e5e7eb; line-height:1.5}
+    header{padding:40px 20px;text-align:center;background:linear-gradient(135deg,#020617,#0b0f19)}
+    header h1{margin:0;color:var(--accent);font-size:1.6rem}
+    header p{margin:8px 0 0;color:var(--muted);font-size:0.95rem}
+    .wrap{max-width:1100px;margin:28px auto;padding:0 16px}
+    .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+    button, .btn{background:var(--accent);color:#000;border:0;padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:600}
+    .btn.outline{background:transparent;border:1px solid var(--accent);color:var(--accent)}
+    .note{color:var(--muted);font-size:0.9rem}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+    .card{background:var(--card);border:1px solid var(--border);padding:var(--pad);border-radius:10px;min-height:80px}
+    .card h3{margin:0 0 6px;color:var(--accent);font-size:1rem;display:flex;justify-content:space-between;align-items:center}
+    .ips{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:rgba(0,0,0,0.12);padding:10px;border-radius:8px;overflow:auto;max-height:240px}
+    ul{margin:0;padding:0;list-style:none}
+    li{padding:6px 2px;border-bottom:1px dashed rgba(255,255,255,0.03);font-size:0.93rem}
+    .meta{display:flex;gap:8px;align-items:center}
+    .small{font-size:0.85rem;color:var(--muted)}
+    .error{color:#ff6b6b}
+    .copy-btn{background:#111827;color:var(--accent);border:1px solid #1f2937;padding:6px 8px;border-radius:8px;cursor:pointer}
+    footer{text-align:center;padding:26px 20px;color:var(--muted);font-size:0.9rem}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>GitHub IP Ranges</h1>
+    <p>Live list of GitHub service IP ranges (fetched from the GitHub Meta API)</p>
+  </header>
+
+  <main class="wrap">
+    <div class="controls">
+      <button id="refresh">Refresh</button>
+      <button id="copy-all" class="btn outline">Copy All IPs</button>
+      <div class="note" id="status">Not fetched yet.</div>
+    </div>
+
+    <div id="error" class="error" role="alert" style="display:none"></div>
+
+    <section id="content" class="grid" aria-live="polite">
+      <!-- Sections injected here -->
+    </section>
+
+    <div style="margin-top:18px" class="note">
+      Notes:
+      <ul style="margin-top:6px">
+        <li class="small">This page uses the public endpoint <code>https://api.github.com/meta</code>. Unauthenticated requests are rate-limited (usually 60/hour).</li>
+        <li class="small">If you need these IP ranges for firewall or webhook whitelisting, consider caching them on your server rather than relying on client-side fetch.</li>
+        <li class="small">If the API structure changes, the page will fall back to rendering raw JSON values.</li>
+      </ul>
+    </div>
+  </main>
+
+  <footer>Powered by GitHub Meta API — <a href="https://docs.github.com/en/rest/meta/meta" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">API docs</a></footer>
+
+  <script>
+    const apiUrl = 'https://api.github.com/meta';
+    const content = document.getElementById('content');
+    const status = document.getElementById('status');
+    const errEl = document.getElementById('error');
+
+    async function fetchMeta() {
+      errEl.style.display = 'none';
+      status.textContent = 'Fetching…';
+      try {
+        const res = await fetch(apiUrl);
+        if (!res.ok) throw new Error('HTTP ' + res.status + ' - ' + res.statusText);
+        const json = await res.json();
+        render(json);
+        status.textContent = 'Last fetched: ' + new Date().toLocaleString();
+      } catch (e) {
+        errEl.style.display = '';
+        errEl.textContent = 'Failed to fetch GitHub meta API: ' + e.message;
+        status.textContent = 'Error fetching data';
+        content.innerHTML = '';
+      }
+    }
+
+    function render(obj) {
+      content.innerHTML = '';
+      // Ensure consistent order: common keys first
+      const preferredOrder = ['git', 'api', 'hooks', 'web', 'packages', 'importer', 'pages', 'actions', 'dependabot', 'shared'];
+      const keys = Object.keys(obj).sort((a,b)=>{
+        const ia = preferredOrder.indexOf(a), ib = preferredOrder.indexOf(b);
+        if (ia === -1 && ib === -1) return a.localeCompare(b);
+        if (ia === -1) return 1;
+        if (ib === -1) return -1;
+        return ia - ib;
+      });
+
+      // Collect all IPs for "copy all"
+      const allIps = [];
+
+      keys.forEach(key => {
+        const value = obj[key];
+        const card = document.createElement('article');
+        card.className = 'card';
+        const title = document.createElement('h3');
+        title.innerHTML = `<span>${key}</span>`;
+        card.appendChild(title);
+
+        const body = document.createElement('div');
+        if (Array.isArray(value)) {
+          const ipsDiv = document.createElement('div');
+          ipsDiv.className = 'ips';
+          const ul = document.createElement('ul');
+          value.forEach(ip => {
+            const li = document.createElement('li');
+            li.textContent = ip;
+            ul.appendChild(li);
+            allIps.push(ip);
+          });
+          ipsDiv.appendChild(ul);
+          body.appendChild(ipsDiv);
+
+          const meta = document.createElement('div');
+          meta.className = 'meta';
+          const copyBtn = document.createElement('button');
+          copyBtn.className = 'copy-btn';
+          copyBtn.type = 'button';
+          copyBtn.textContent = 'Copy';
+          copyBtn.title = 'Copy IP list for ' + key;
+          copyBtn.addEventListener('click', () => {
+            navigator.clipboard.writeText(value.join('\n')).then(()=> {
+              copyBtn.textContent = 'Copied ✓';
+              setTimeout(()=>copyBtn.textContent = 'Copy', 1200);
+            });
+          });
+          meta.appendChild(copyBtn);
+          const count = document.createElement('div');
+          count.className = 'small';
+          count.textContent = value.length + ' entries';
+          meta.appendChild(count);
+          body.appendChild(meta);
+
+        } else if (typeof value === 'object' && value !== null) {
+          // Render JSON prettified
+          const pre = document.createElement('pre');
+          pre.style.whiteSpace = 'pre-wrap';
+          pre.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, monospace';
+          pre.textContent = JSON.stringify(value, null, 2);
+          body.appendChild(pre);
+        } else {
+          const p = document.createElement('p');
+          p.className = 'small';
+          p.textContent = String(value);
+          body.appendChild(p);
+        }
+
+        card.appendChild(body);
+        content.appendChild(card);
+      });
+
+      // wire copy-all button
+      const copyAllBtn = document.getElementById('copy-all');
+      copyAllBtn.disabled = allIps.length === 0;
+      copyAllBtn.onclick = () => {
+        if (allIps.length === 0) return;
+        navigator.clipboard.writeText([...new Set(allIps)].join('\n')).then(() => {
+          const prev = copyAllBtn.textContent;
+          copyAllBtn.textContent = 'Copied ✓';
+          setTimeout(()=> copyAllBtn.textContent = prev, 1200);
+        });
+      };
+    }
+
+    document.getElementById('refresh').addEventListener('click', fetchMeta);
+
+    // initial fetch on load
+    fetchMeta();
+  </script>
+</body>
+</html>
